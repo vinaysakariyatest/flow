@@ -44,3 +44,25 @@ exports.addUser = async (req, res) => {
         return responseManager.internalServer(error, res);
     }
 };
+
+exports.searchUser = async (req, res) => {
+    try {
+        const primary = mongoConnection.useDb(constants.DEFAULT_DB);
+        const { search } = req.body;
+
+        if (!search || search.trim() === "") {
+            return responseManager.onBadRequest("Search term required", res);
+        }
+        const companyData = await primary.model(constants.MODELS.user, userModel).find({
+            company_name: { $regex: search, $options: "i" }
+        }).select("name company_name consent phone link1 link2");
+        if(companyData.length > 0){
+            return responseManager.onSuccess("Search result", companyData, res);
+        }else{
+            return responseManager.onBadRequest("Data not found", res);
+        }
+    } catch (error) {
+        console.log(":::::error:::::", error);
+        return responseManager.internalServer(error, res);
+    }
+};
