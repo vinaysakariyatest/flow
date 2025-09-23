@@ -1,7 +1,8 @@
 const constants = {
     DEFAULT_DB: "exhibitor",
     MODELS: {
-        user: "user"
+        user: "user",
+        category: "category"
     }
 }
 
