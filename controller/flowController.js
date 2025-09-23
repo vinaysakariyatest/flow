@@ -9,7 +9,7 @@ exports.addUser = async (req, res) => {
     try {
         const primary = mongoConnection.useDb(constants.DEFAULT_DB);
         let { name, company_name, tags, category, consent, phone, link1, link2 } = req.body;
-
+        console.log('=======req.body', JSON.stringify(req.body))
         const categoryIds = [];
         for (const catName of category) {
             let cat = await primary
