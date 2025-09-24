@@ -5,6 +5,35 @@ const userModel = require("../models/user.model");
 const constants = require("../utilities/constants");
 const categoryModel = require("../models/category.model");
 
+exports.checkUserProfile = async (req, res) => {
+    try {
+        const primary = mongoConnection.useDb(constants.DEFAULT_DB);
+        const { phone } = req.body;
+
+        if (!phone) {
+            return responseManager.onBadRequest("Phone number required", res);
+        }
+
+        // DB me check karo user exist karta hai ya nahi
+        const user = await primary
+            .model(constants.MODELS.user, userModel)
+            .findOne({ phone: phone })
+            .select("name company_name bio interests consent phone link1 link2");
+
+        if (user) {
+            // agar mila → valid user
+            return responseManager.onSuccess("Profile exists", user, res);
+        } else {
+            // agar nahi mila → not found
+            return responseManager.notFoundRequest("Profile not found", res);
+        }
+    } catch (error) {
+        console.log(":::::error:::::", error);
+        return responseManager.internalServer(error, res);
+    }
+};
+
+
 exports.addUser = async (req, res) => {
     try {
         const primary = mongoConnection.useDb(constants.DEFAULT_DB);
