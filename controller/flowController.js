@@ -159,70 +159,16 @@ exports.searchUser = async (req, res) => {
 };
 
 function cosineSimilarity(vecA, vecB) {
-    const dot = vecA.reduce((sum, a, i) => sum + a * vecB[i], 0);
-    const normA = Math.sqrt(vecA.reduce((sum, a) => sum + a * a, 0));
-    const normB = Math.sqrt(vecB.reduce((sum, b) => sum + b * b, 0));
-    return dot / (normA * normB);
-}
-
-exports.searchUserByCategoryAndBio = async (req, res) => {
-    try {
-        const primary = mongoConnection.useDb(constants.DEFAULT_DB);
-        const { categorySearch, bioSearch } = req.body;
-        if ((!categorySearch || categorySearch.trim() === "") && (!bioSearch || bioSearch.trim() === "")) {
-            return responseManager.onBadRequest("At least one search term required", res);
-        }
-        let query = {};
-        if (categorySearch && categorySearch.trim() !== "") {
-            query.category = { $elemMatch: { $regex: categorySearch, $options: "i" } };
-        }
-        let allUsers = await primary
-            .model(constants.MODELS.user, userModel)
-            .find(query)
-            .lean();
-
-        if (allUsers.length === 0) {
-            return responseManager.onBadRequest("Data not found", res);
-        }
-        let bestUser = null;
-        if (bioSearch && bioSearch.trim() !== "") {
-            const embeddingResponse = await axios.post(
-                `https://generativelanguage.googleapis.com/v1beta/models/gemini-embedding-001:embedContent?key=${process.env.GEMINI_API_KEY}`,
-                {
-                    model: "models/gemini-embedding-001",
-                    content: { parts: [{ text: bioSearch }] }
-                }
-            );
-            const searchVector = embeddingResponse.data.embedding.values;
-
-            let maxSim = -1;
-            for (let user of allUsers) {
-                if (user.bio_vector) {
-                    const sim = cosineSimilarity(searchVector, user.bio_vector);
-                    if (sim > maxSim) {
-                        maxSim = sim;
-                        bestUser = user;
-                    }
-                }
-            }
-        } else {
-            bestUser = allUsers.sort((a, b) => a.searchCount - b.searchCount)[0];
-        }
-        if (bestUser) {
-            await primary
-                .model(constants.MODELS.user, userModel)
-                .findByIdAndUpdate(bestUser._id, { $inc: { searchCount: 1 } });
-            -delete bestUser.bio_vector
-            return responseManager.onSuccess("Search result", bestUser, res);
-        } else {
-            return responseManager.onBadRequest("No matching bio found", res);
-        }
-
-    } catch (error) {
-        console.log(":::::error:::::", error?.response?.data || error);
-        return responseManager.internalServer(error, res);
+    if (!vecA || !vecB || vecA.length !== vecB.length) return 0;
+    let dot = 0.0, normA = 0.0, normB = 0.0;
+    for (let i = 0; i < vecA.length; i++) {
+        dot += vecA[i] * vecB[i];
+        normA += vecA[i] * vecA[i];
+        normB += vecB[i] * vecB[i];
     }
-};
+    if (normA === 0 || normB === 0) return 0;
+    return dot / (Math.sqrt(normA) * Math.sqrt(normB));
+}
 
 // exports.searchUserByCategoryAndBio = async (req, res) => {
 //     try {
@@ -232,41 +178,111 @@ exports.searchUserByCategoryAndBio = async (req, res) => {
 //         if ((!categorySearch || categorySearch.trim() === "") && (!bioSearch || bioSearch.trim() === "")) {
 //             return responseManager.onBadRequest("At least one search term required", res);
 //         }
-
 //         let query = {};
 //         if (categorySearch && categorySearch.trim() !== "") {
 //             query.category = { $elemMatch: { $regex: categorySearch, $options: "i" } };
 //         }
-//         if (bioSearch && bioSearch.trim() !== "") {
-//             query.bio = { $regex: bioSearch, $options: "i" };
-//         }
-//         let userData = await primary
-//             .model(constants.MODELS.user, userModel)
-//             .findOneAndUpdate(
-//                 { ...query, viewedInCurrentSession: { $ne: true } },
-//                 { $inc: { searchCount: 1 }, $set: { viewedInCurrentSession: true } },
-//                 { sort: { searchCount: 1 }, new: true }
-//             )
-//             .lean();
 
-//         if (!userData) {
-//             userData = await primary
-//                 .model(constants.MODELS.user, userModel)
-//                 .findOneAndUpdate(
-//                     query,
-//                     { $inc: { searchCount: 1 }, $set: { viewedInCurrentSession: true } },
-//                     { sort: { searchCount: 1 }, new: true }
-//                 )
-//                 .lean();
+//         let allUsers = await primary
+//             .model(constants.MODELS.user, userModel)
+//             .find(query)
+//             .lean();
+//         if (allUsers.length === 0) {
+//             return responseManager.onBadRequest("No users found for given category/bio", res);
 //         }
-//         if (userData) {
-//             return responseManager.onSuccess("Search result", userData, res);
+//         let bestUser = null;
+
+//         if (bioSearch && bioSearch.trim() !== "") {
+//             const embeddingResponse = await axios.post(
+//                 `https://generativelanguage.googleapis.com/v1beta/models/gemini-embedding-001:embedContent?key=${process.env.GEMINI_API_KEY}`,
+//                 {
+//                     model: "models/gemini-embedding-001",
+//                     content: { parts: [{ text: bioSearch }] }
+//                 }
+//             );
+
+//             const searchVector = embeddingResponse.data.embedding.values;
+
+//             let maxSim = -1;
+//             for (let user of allUsers) {
+//                 if (user.bio_vector && user.bio_vector.length > 0) {
+//                     const sim = cosineSimilarity(searchVector, user.bio_vector);
+//                     if (sim > maxSim) {
+//                         maxSim = sim;
+//                         bestUser = user;
+//                     }
+//                 }
+//             }
+//             if (!bestUser) {
+//                 return responseManager.onBadRequest("No matching bio found", res);
+//             }
+
 //         } else {
-//             return responseManager.onBadRequest("Data not found", res);
+//             // -------------------------------
+//             // 3. If no bio → pick lowest searchCount user
+//             // -------------------------------
+//             bestUser = allUsers.sort((a, b) => a.searchCount - b.searchCount)[0];
 //         }
+
+//         // -------------------------------
+//         // 4. Update count
+//         // -------------------------------
+//         await primary
+//             .model(constants.MODELS.user, userModel)
+//             .findByIdAndUpdate(bestUser._id, { $inc: { searchCount: 1 } });
+
+//         delete bestUser.bio_vector;
+//         return responseManager.onSuccess("Search result", bestUser, res);
 
 //     } catch (error) {
-//         console.log(":::::error:::::", error);
+//         console.log(":::::error:::::", error?.response?.data || error);
 //         return responseManager.internalServer(error, res);
 //     }
 // };
+
+exports.searchUserByCategoryAndBio = async (req, res) => {
+    try {
+        const primary = mongoConnection.useDb(constants.DEFAULT_DB);
+        const { categorySearch, bioSearch } = req.body;
+
+        if ((!categorySearch || categorySearch.trim() === "") && (!bioSearch || bioSearch.trim() === "")) {
+            return responseManager.onBadRequest("At least one search term required", res);
+        }
+
+        let query = {};
+        if (categorySearch && categorySearch.trim() !== "") {
+            query.category = { $elemMatch: { $regex: categorySearch, $options: "i" } };
+        }
+        if (bioSearch && bioSearch.trim() !== "") {
+            query.bio = { $regex: bioSearch, $options: "i" };
+        }
+        let userData = await primary
+            .model(constants.MODELS.user, userModel)
+            .findOneAndUpdate(
+                { ...query, viewedInCurrentSession: { $ne: true } },
+                { $inc: { searchCount: 1 }, $set: { viewedInCurrentSession: true } },
+                { sort: { searchCount: 1 }, new: true }
+            )
+            .lean();
+
+        if (!userData) {
+            userData = await primary
+                .model(constants.MODELS.user, userModel)
+                .findOneAndUpdate(
+                    query,
+                    { $inc: { searchCount: 1 }, $set: { viewedInCurrentSession: true } },
+                    { sort: { searchCount: 1 }, new: true }
+                )
+                .lean();
+        }
+        if (userData) {
+            return responseManager.onSuccess("Search result", userData, res);
+        } else {
+            return responseManager.onBadRequest("Data not found", res);
+        }
+
+    } catch (error) {
+        console.log(":::::error:::::", error);
+        return responseManager.internalServer(error, res);
+    }
+};
