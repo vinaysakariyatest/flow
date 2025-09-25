@@ -4,6 +4,7 @@ const flowModel = require("../models/flow.model");
 const userModel = require("../models/user.model");
 const constants = require("../utilities/constants");
 const categoryModel = require("../models/category.model");
+const axios = require("axios");
 // const { GoogleGenAI } = require('@google/genai');
 // const genAI = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
 
@@ -30,49 +31,22 @@ exports.checkUserProfile = async (req, res) => {
     }
 };
 
-// exports.addUser = async (req, res) => {
-//     try {
-//         const primary = mongoConnection.useDb(constants.DEFAULT_DB);
-//         let { name, company_name, category, consent, phone, link1, link2, bio } = req.body;
-
-//         let bio_vector = null;
-//         if (bio && bio.trim() !== "") {
-//             const modelName = "text-embedding-004";
-//             const embeddingResponse = await genAI.models.embedContent({
-//                 model: modelName,
-//                 content: bio, 
-//             });
-//             bio_vector = embeddingResponse.embedding.values;
-//         }
-//         console.log(":::::bio_vector", bio_vector)
-//         const obj = {
-//             name,
-//             company_name,
-//             category,
-//             consent,
-//             phone,
-//             link1,
-//             link2,
-//             bio,
-//             bio_vector
-//         };
-
-//         const userData = await primary
-//             .model(constants.MODELS.user, userModel)
-//             .create(obj);
-
-//         return responseManager.onSuccess("Data added successfully", userData, res);
-//     } catch (error) {
-//         console.log(":::::error:::::", error);
-//         return responseManager.internalServer(error, res);
-//     }
-// };
-
 exports.addUser = async (req, res) => {
     try {
         const primary = mongoConnection.useDb(constants.DEFAULT_DB);
         let { name, company_name, category, consent, phone, link1, link2, bio } = req.body;
-        console.log('=======req.body', JSON.stringify(req.body))
+
+        let bio_vector = null;
+        if (bio && bio.trim() !== "") {
+            const embeddingResponse = await axios.post(
+                `https://generativelanguage.googleapis.com/v1beta/models/gemini-embedding-001:embedContent?key=${process.env.GEMINI_API_KEY}`,
+                {
+                    model: "models/gemini-embedding-001",
+                    content: { parts: [{ text: bio }] }
+                }
+            );
+            bio_vector = embeddingResponse.data.embedding.values;
+        }
         const obj = {
             name,
             company_name,
@@ -81,17 +55,46 @@ exports.addUser = async (req, res) => {
             phone,
             link1,
             link2,
-            bio
+            bio,
+            bio_vector,
+            searchCount: 0
         };
+
         const userData = await primary
             .model(constants.MODELS.user, userModel)
             .create(obj);
+
         return responseManager.onSuccess("Data added successfully", userData, res);
     } catch (error) {
-        console.log(":::::error:::::", error);
+        console.log(":::::error:::::", error?.response?.data || error);
         return responseManager.internalServer(error, res);
     }
 };
+
+// exports.addUser = async (req, res) => {
+//     try {
+//         const primary = mongoConnection.useDb(constants.DEFAULT_DB);
+//         let { name, company_name, category, consent, phone, link1, link2, bio } = req.body;
+//         console.log('=======req.body', JSON.stringify(req.body))
+//         const obj = {
+//             name,
+//             company_name,
+//             category,
+//             consent,
+//             phone,
+//             link1,
+//             link2,
+//             bio
+//         };
+//         const userData = await primary
+//             .model(constants.MODELS.user, userModel)
+//             .create(obj);
+//         return responseManager.onSuccess("Data added successfully", userData, res);
+//     } catch (error) {
+//         console.log(":::::error:::::", error);
+//         return responseManager.internalServer(error, res);
+//     }
+// };
 
 exports.updateUser = async (req, res) => {
     try {
@@ -155,79 +158,113 @@ exports.searchUser = async (req, res) => {
     }
 };
 
+function cosineSimilarity(vecA, vecB) {
+    const dot = vecA.reduce((sum, a, i) => sum + a * vecB[i], 0);
+    const normA = Math.sqrt(vecA.reduce((sum, a) => sum + a * a, 0));
+    const normB = Math.sqrt(vecB.reduce((sum, b) => sum + b * b, 0));
+    return dot / (normA * normB);
+}
+
 exports.searchUserByCategoryAndBio = async (req, res) => {
     try {
         const primary = mongoConnection.useDb(constants.DEFAULT_DB);
         const { categorySearch, bioSearch } = req.body;
-
         if ((!categorySearch || categorySearch.trim() === "") && (!bioSearch || bioSearch.trim() === "")) {
             return responseManager.onBadRequest("At least one search term required", res);
         }
-
-        // Base query
         let query = {};
         if (categorySearch && categorySearch.trim() !== "") {
             query.category = { $elemMatch: { $regex: categorySearch, $options: "i" } };
         }
-        if (bioSearch && bioSearch.trim() !== "") {
-            query.bio = { $regex: bioSearch, $options: "i" };
-        }
-
-        // Find the record with lowest searchCount
-        // Step 1: Try to find record not viewed yet
-        let userData = await primary
+        let allUsers = await primary
             .model(constants.MODELS.user, userModel)
-            .findOneAndUpdate(
-                { ...query, viewedInCurrentSession: { $ne: true } },
-                { $inc: { searchCount: 1 }, $set: { viewedInCurrentSession: true } },
-                { sort: { searchCount: 1 }, new: true }
-            )
+            .find(query)
             .lean();
 
-        // Step 2: Agar sab viewed ho gaye ho, phir lowest searchCount wala fetch karo
-        if (!userData) {
-            userData = await primary
-                .model(constants.MODELS.user, userModel)
-                .findOneAndUpdate(
-                    query,
-                    { $inc: { searchCount: 1 }, $set: { viewedInCurrentSession: true } },
-                    { sort: { searchCount: 1 }, new: true }
-                )
-                .lean();
-        }
-
-        if (userData) {
-            return responseManager.onSuccess("Search result", userData, res);
-        } else {
+        if (allUsers.length === 0) {
             return responseManager.onBadRequest("Data not found", res);
+        }
+        let bestUser = null;
+        if (bioSearch && bioSearch.trim() !== "") {
+            const embeddingResponse = await axios.post(
+                `https://generativelanguage.googleapis.com/v1beta/models/gemini-embedding-001:embedContent?key=${process.env.GEMINI_API_KEY}`,
+                {
+                    model: "models/gemini-embedding-001",
+                    content: { parts: [{ text: bioSearch }] }
+                }
+            );
+            const searchVector = embeddingResponse.data.embedding.values;
+
+            let maxSim = -1;
+            for (let user of allUsers) {
+                if (user.bio_vector) {
+                    const sim = cosineSimilarity(searchVector, user.bio_vector);
+                    if (sim > maxSim) {
+                        maxSim = sim;
+                        bestUser = user;
+                    }
+                }
+            }
+        } else {
+            bestUser = allUsers.sort((a, b) => a.searchCount - b.searchCount)[0];
+        }
+        if (bestUser) {
+            await primary
+                .model(constants.MODELS.user, userModel)
+                .findByIdAndUpdate(bestUser._id, { $inc: { searchCount: 1 } });
+            -delete bestUser.bio_vector
+            return responseManager.onSuccess("Search result", bestUser, res);
+        } else {
+            return responseManager.onBadRequest("No matching bio found", res);
         }
 
     } catch (error) {
-        console.log(":::::error:::::", error);
+        console.log(":::::error:::::", error?.response?.data || error);
         return responseManager.internalServer(error, res);
     }
 };
 
-// exports.searchUserByCategory = async (req, res) => {
+// exports.searchUserByCategoryAndBio = async (req, res) => {
 //     try {
 //         const primary = mongoConnection.useDb(constants.DEFAULT_DB);
-//         const { search } = req.body;
+//         const { categorySearch, bioSearch } = req.body;
 
-//         if (!search || search.trim() === "") {
-//             return responseManager.onBadRequest("Search term required", res);
+//         if ((!categorySearch || categorySearch.trim() === "") && (!bioSearch || bioSearch.trim() === "")) {
+//             return responseManager.onBadRequest("At least one search term required", res);
 //         }
 
-//         const userData = await primary
+//         let query = {};
+//         if (categorySearch && categorySearch.trim() !== "") {
+//             query.category = { $elemMatch: { $regex: categorySearch, $options: "i" } };
+//         }
+//         if (bioSearch && bioSearch.trim() !== "") {
+//             query.bio = { $regex: bioSearch, $options: "i" };
+//         }
+//         let userData = await primary
 //             .model(constants.MODELS.user, userModel)
-//             .find({
-//                 category: { $elemMatch: { $regex: search, $options: "i" } }
-//             });
+//             .findOneAndUpdate(
+//                 { ...query, viewedInCurrentSession: { $ne: true } },
+//                 { $inc: { searchCount: 1 }, $set: { viewedInCurrentSession: true } },
+//                 { sort: { searchCount: 1 }, new: true }
+//             )
+//             .lean();
 
-//         if (userData.length > 0) {
+//         if (!userData) {
+//             userData = await primary
+//                 .model(constants.MODELS.user, userModel)
+//                 .findOneAndUpdate(
+//                     query,
+//                     { $inc: { searchCount: 1 }, $set: { viewedInCurrentSession: true } },
+//                     { sort: { searchCount: 1 }, new: true }
+//                 )
+//                 .lean();
+//         }
+//         if (userData) {
 //             return responseManager.onSuccess("Search result", userData, res);
 //         } else {
 //             return responseManager.onBadRequest("Data not found", res);
 //         }
+
 //     } catch (error) {
 //         console.log(":::::error:::::", error);
 //         return responseManager.internalServer(error, res);
