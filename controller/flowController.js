@@ -90,7 +90,6 @@ exports.addUser = async (req, res) => {
             link2,
             bio
         };
-        return
         const userData = await primary
             .model(constants.MODELS.user, userModel)
             .create(obj);
