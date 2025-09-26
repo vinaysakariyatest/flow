@@ -249,13 +249,16 @@ exports.searchUserByCategoryAndBio = async (req, res) => {
         const primary = mongoConnection.useDb(constants.DEFAULT_DB);
         const { categorySearch, bioSearch } = req.body;
 
-        if ((!categorySearch || categorySearch.trim() === "") && (!bioSearch || bioSearch.trim() === "")) {
+        if ((!categorySearch || categorySearch.length === 0) && (!bioSearch || bioSearch.trim() === "")) {
             return responseManager.onBadRequest("At least one search term required", res);
         }
 
         let query = {};
-        if (categorySearch && categorySearch.trim() !== "") {
-            query.category = { $elemMatch: { $regex: categorySearch, $options: "i" } };
+        if (categorySearch && categorySearch.length > 0) {
+            if (typeof categorySearch === "string") {
+                categorySearch = categorySearch.split(',').map(c => c.trim());
+            }
+            query.category = { $in: categorySearch.map(c => new RegExp(c, "i")) };
         }
         if (bioSearch && bioSearch.trim() !== "") {
             query.bio = { $regex: bioSearch, $options: "i" };
