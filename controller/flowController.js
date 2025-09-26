@@ -162,92 +162,10 @@ exports.searchUser = async (req, res) => {
     }
 };
 
-// function cosineSimilarity(vecA, vecB) {
-//     if (!vecA || !vecB || vecA.length !== vecB.length) return 0;
-//     let dot = 0.0, normA = 0.0, normB = 0.0;
-//     for (let i = 0; i < vecA.length; i++) {
-//         dot += vecA[i] * vecB[i];
-//         normA += vecA[i] * vecA[i];
-//         normB += vecB[i] * vecB[i];
-//     }
-//     if (normA === 0 || normB === 0) return 0;
-//     return dot / (Math.sqrt(normA) * Math.sqrt(normB));
-// }
-
-// exports.searchUserByCategoryAndBio = async (req, res) => {
-//     try {
-//         const primary = mongoConnection.useDb(constants.DEFAULT_DB);
-//         const { categorySearch, bioSearch } = req.body;
-
-//         if ((!categorySearch || categorySearch.trim() === "") && (!bioSearch || bioSearch.trim() === "")) {
-//             return responseManager.onBadRequest("At least one search term required", res);
-//         }
-//         let query = {};
-//         if (categorySearch && categorySearch.trim() !== "") {
-//             query.category = { $elemMatch: { $regex: categorySearch, $options: "i" } };
-//         }
-
-//         let allUsers = await primary
-//             .model(constants.MODELS.user, userModel)
-//             .find(query)
-//             .lean();
-//         if (allUsers.length === 0) {
-//             return responseManager.onBadRequest("No users found for given category/bio", res);
-//         }
-//         let bestUser = null;
-
-//         if (bioSearch && bioSearch.trim() !== "") {
-//             const embeddingResponse = await axios.post(
-//                 `https://generativelanguage.googleapis.com/v1beta/models/gemini-embedding-001:embedContent?key=${process.env.GEMINI_API_KEY}`,
-//                 {
-//                     model: "models/gemini-embedding-001",
-//                     content: { parts: [{ text: bioSearch }] }
-//                 }
-//             );
-
-//             const searchVector = embeddingResponse.data.embedding.values;
-
-//             let maxSim = -1;
-//             for (let user of allUsers) {
-//                 if (user.bio_vector && user.bio_vector.length > 0) {
-//                     const sim = cosineSimilarity(searchVector, user.bio_vector);
-//                     if (sim > maxSim) {
-//                         maxSim = sim;
-//                         bestUser = user;
-//                     }
-//                 }
-//             }
-//             if (!bestUser) {
-//                 return responseManager.onBadRequest("No matching bio found", res);
-//             }
-
-//         } else {
-//             // -------------------------------
-//             // 3. If no bio → pick lowest searchCount user
-//             // -------------------------------
-//             bestUser = allUsers.sort((a, b) => a.searchCount - b.searchCount)[0];
-//         }
-
-//         // -------------------------------
-//         // 4. Update count
-//         // -------------------------------
-//         await primary
-//             .model(constants.MODELS.user, userModel)
-//             .findByIdAndUpdate(bestUser._id, { $inc: { searchCount: 1 } });
-
-//         delete bestUser.bio_vector;
-//         return responseManager.onSuccess("Search result", bestUser, res);
-
-//     } catch (error) {
-//         console.log(":::::error:::::", error?.response?.data || error);
-//         return responseManager.internalServer(error, res);
-//     }
-// };
-
 exports.searchUserByCategoryAndBio = async (req, res) => {
     try {
         const primary = mongoConnection.useDb(constants.DEFAULT_DB);
-        const { categorySearch, bioSearch } = req.body;
+        let { categorySearch, bioSearch, phone } = req.body;
 
         if ((!categorySearch || categorySearch.length === 0) && (!bioSearch || bioSearch.trim() === "")) {
             return responseManager.onBadRequest("At least one search term required", res);
@@ -260,39 +178,160 @@ exports.searchUserByCategoryAndBio = async (req, res) => {
             }
             query.category = { $in: categorySearch.map(c => new RegExp(c, "i")) };
         }
+
         if (bioSearch && bioSearch.trim() !== "") {
             query.bio = { $regex: bioSearch, $options: "i" };
         }
-        let userData = await primary
+        if (phone && phone.trim() !== "") {
+            query.phone = { $ne: phone.trim() };
+        }
+
+        let users = await primary
             .model(constants.MODELS.user, userModel)
-            .findOneAndUpdate(
-                { ...query, viewedInCurrentSession: { $ne: true } },
-                { $inc: { searchCount: 1 }, $set: { viewedInCurrentSession: true } },
-                { sort: { searchCount: 1 }, new: true }
-            )
+            .find({ ...query, alreadyShown: { $ne: true } })
+            .sort({ searchCount: 1 })
             .lean();
 
-        if (!userData) {
-            userData = await primary
+        if (users.length === 0) {
+            await primary
                 .model(constants.MODELS.user, userModel)
-                .findOneAndUpdate(
-                    query,
-                    { $inc: { searchCount: 1 }, $set: { viewedInCurrentSession: true } },
-                    { sort: { searchCount: 1 }, new: true }
-                )
+                .updateMany(query, { $set: { alreadyShown: false } });
+
+            users = await primary
+                .model(constants.MODELS.user, userModel)
+                .find(query)
+                .sort({ searchCount: 1 })
                 .lean();
         }
-        if (userData) {
-            return responseManager.onSuccess("Search result", userData, res);
-        } else {
+
+        if (users.length === 0) {
             return responseManager.onBadRequest("Data not found", res);
         }
 
+        const minCount = users[0].searchCount;
+        const candidates = users.filter(u => u.searchCount === minCount);
+        const randomUser = candidates[Math.floor(Math.random() * candidates.length)];
+
+        await primary
+            .model(constants.MODELS.user, userModel)
+            .updateOne(
+                { _id: randomUser._id },
+                { $inc: { searchCount: 1 }, $set: { alreadyShown: true } }
+            );
+        return responseManager.onSuccess("Search result", randomUser, res);
     } catch (error) {
         console.log(":::::error:::::", error);
         return responseManager.internalServer(error, res);
     }
 };
+
+
+// With phone
+// exports.searchUserByCategoryAndBio = async (req, res) => {
+//     try {
+//         const primary = mongoConnection.useDb(constants.DEFAULT_DB);
+//         let { categorySearch, bioSearch, phone } = req.body;
+
+//         if ((!categorySearch || categorySearch.length === 0) && (!bioSearch || bioSearch.trim() === "")) {
+//             return responseManager.onBadRequest("At least one search term required", res);
+//         }
+//         let query = {};
+//         if (categorySearch && categorySearch.length > 0) {
+//             if (typeof categorySearch === "string") {
+//                 categorySearch = categorySearch.split(',').map(c => c.trim());
+//             }
+//             query.category = { $in: categorySearch.map(c => new RegExp(c, "i")) };
+//         }
+//         if (bioSearch && bioSearch.trim() !== "") {
+//             query.bio = { $regex: bioSearch, $options: "i" };
+//         }
+//         if (phone && phone.trim() !== "") {
+//             query.phone = { $ne: phone.trim() };
+//         }
+//         let users = await primary
+//             .model(constants.MODELS.user, userModel)
+//             .find({ ...query, viewedInCurrentSession: { $ne: true } })
+//             .sort({ searchCount: 1 })
+//             .lean();
+
+//         if (users.length === 0) {
+//             users = await primary
+//                 .model(constants.MODELS.user, userModel)
+//                 .find(query)
+//                 .sort({ searchCount: 1 })
+//                 .lean();
+//         }
+
+//         if (users.length === 0) {
+//             return responseManager.onBadRequest("Data not found", res);
+//         }
+//         const minCount = users[0].searchCount;
+//         const candidates = users.filter(u => u.searchCount === minCount);
+//         const randomUser = candidates[Math.floor(Math.random() * candidates.length)];
+
+//         await primary
+//             .model(constants.MODELS.user, userModel)
+//             .updateOne(
+//                 { _id: randomUser._id },
+//                 { $inc: { searchCount: 1 }, $set: { viewedInCurrentSession: true } }
+//             );
+//         return responseManager.onSuccess("Search result", randomUser, res);
+//     } catch (error) {
+//         console.log(":::::error:::::", error);
+//         return responseManager.internalServer(error, res);
+//     }
+// };
+
+//Without phone
+// exports.searchUserByCategoryAndBio = async (req, res) => {
+//     try {
+//         const primary = mongoConnection.useDb(constants.DEFAULT_DB);
+//         const { categorySearch, bioSearch } = req.body;
+
+//         if ((!categorySearch || categorySearch.length === 0) && (!bioSearch || bioSearch.trim() === "")) {
+//             return responseManager.onBadRequest("At least one search term required", res);
+//         }
+
+//         let query = {};
+//         if (categorySearch && categorySearch.length > 0) {
+//             if (typeof categorySearch === "string") {
+//                 categorySearch = categorySearch.split(',').map(c => c.trim());
+//             }
+//             query.category = { $in: categorySearch.map(c => new RegExp(c, "i")) };
+//         }
+//         if (bioSearch && bioSearch.trim() !== "") {
+//             query.bio = { $regex: bioSearch, $options: "i" };
+//         }
+//         let userData = await primary
+//             .model(constants.MODELS.user, userModel)
+//             .findOneAndUpdate(
+//                 { ...query, viewedInCurrentSession: { $ne: true } },
+//                 { $inc: { searchCount: 1 }, $set: { viewedInCurrentSession: true } },
+//                 { sort: { searchCount: 1 }, new: true }
+//             )
+//             .lean();
+
+//         if (!userData) {
+//             userData = await primary
+//                 .model(constants.MODELS.user, userModel)
+//                 .findOneAndUpdate(
+//                     query,
+//                     { $inc: { searchCount: 1 }, $set: { viewedInCurrentSession: true } },
+//                     { sort: { searchCount: 1 }, new: true }
+//                 )
+//                 .lean();
+//         }
+//         if (userData) {
+//             return responseManager.onSuccess("Search result", userData, res);
+//         } else {
+//             return responseManager.onBadRequest("Data not found", res);
+//         }
+
+//     } catch (error) {
+//         console.log(":::::error:::::", error);
+//         return responseManager.internalServer(error, res);
+//     }
+// };
 
 exports.getCategoryByUser = async (req, res) => {
     try {
