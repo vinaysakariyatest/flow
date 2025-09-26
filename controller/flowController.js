@@ -76,16 +76,21 @@ exports.addUser = async (req, res) => {
         const primary = mongoConnection.useDb(constants.DEFAULT_DB);
         let { name, company_name, category, consent, phone, link1, link2, bio } = req.body;
         console.log('=======req.body', JSON.stringify(req.body))
+
+        const categoryArray = category
+            ? category.split(',').map(item => item.trim())
+            : [];
         const obj = {
             name,
             company_name,
-            category,
+            category: categoryArray,
             consent,
             phone,
             link1,
             link2,
             bio
         };
+        return
         const userData = await primary
             .model(constants.MODELS.user, userModel)
             .create(obj);
@@ -292,7 +297,7 @@ exports.getCategoryByUser = async (req, res) => {
         const primary = mongoConnection.useDb(constants.DEFAULT_DB);
         const { phone } = req.body;
         const userData = await primary.model(constants.MODELS.user, userModel).findOne({ phone: phone }).select("category").lean();
-        if(!userData){
+        if (!userData) {
             return responseManager.onBadRequest("Data not found", res);
         }
         return responseManager.onSuccess("Data get successfully!", userData, res);
