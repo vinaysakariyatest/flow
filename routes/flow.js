@@ -7,5 +7,6 @@ router.post("/addUser", flowController.addUser);
 router.post("/searchCompany", flowController.searchUser);
 router.post("/updateUser/:mobile", flowController.updateUser);
 router.post("/searchByCategory", flowController.searchUserByCategoryAndBio);
+router.post("/getCategoryByUser", flowController.getCategoryByUser);
 
 module.exports = router

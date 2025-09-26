@@ -31,51 +31,22 @@ exports.checkUserProfile = async (req, res) => {
     }
 };
 
-exports.addUser = async (req, res) => {
-    try {
-        const primary = mongoConnection.useDb(constants.DEFAULT_DB);
-        let { name, company_name, category, consent, phone, link1, link2, bio } = req.body;
-
-        let bio_vector = null;
-        if (bio && bio.trim() !== "") {
-            const embeddingResponse = await axios.post(
-                `https://generativelanguage.googleapis.com/v1beta/models/gemini-embedding-001:embedContent?key=${process.env.GEMINI_API_KEY}`,
-                {
-                    model: "models/gemini-embedding-001",
-                    content: { parts: [{ text: bio }] }
-                }
-            );
-            bio_vector = embeddingResponse.data.embedding.values;
-        }
-        const obj = {
-            name,
-            company_name,
-            category,
-            consent,
-            phone,
-            link1,
-            link2,
-            bio,
-            bio_vector,
-            searchCount: 0
-        };
-
-        const userData = await primary
-            .model(constants.MODELS.user, userModel)
-            .create(obj);
-
-        return responseManager.onSuccess("Data added successfully", userData, res);
-    } catch (error) {
-        console.log(":::::error:::::", error?.response?.data || error);
-        return responseManager.internalServer(error, res);
-    }
-};
-
 // exports.addUser = async (req, res) => {
 //     try {
 //         const primary = mongoConnection.useDb(constants.DEFAULT_DB);
 //         let { name, company_name, category, consent, phone, link1, link2, bio } = req.body;
-//         console.log('=======req.body', JSON.stringify(req.body))
+
+//         let bio_vector = null;
+//         if (bio && bio.trim() !== "") {
+//             const embeddingResponse = await axios.post(
+//                 `https://generativelanguage.googleapis.com/v1beta/models/gemini-embedding-001:embedContent?key=${process.env.GEMINI_API_KEY}`,
+//                 {
+//                     model: "models/gemini-embedding-001",
+//                     content: { parts: [{ text: bio }] }
+//                 }
+//             );
+//             bio_vector = embeddingResponse.data.embedding.values;
+//         }
 //         const obj = {
 //             name,
 //             company_name,
@@ -84,17 +55,46 @@ exports.addUser = async (req, res) => {
 //             phone,
 //             link1,
 //             link2,
-//             bio
+//             bio,
+//             bio_vector,
+//             searchCount: 0
 //         };
+
 //         const userData = await primary
 //             .model(constants.MODELS.user, userModel)
 //             .create(obj);
+
 //         return responseManager.onSuccess("Data added successfully", userData, res);
 //     } catch (error) {
-//         console.log(":::::error:::::", error);
+//         console.log(":::::error:::::", error?.response?.data || error);
 //         return responseManager.internalServer(error, res);
 //     }
 // };
+
+exports.addUser = async (req, res) => {
+    try {
+        const primary = mongoConnection.useDb(constants.DEFAULT_DB);
+        let { name, company_name, category, consent, phone, link1, link2, bio } = req.body;
+        console.log('=======req.body', JSON.stringify(req.body))
+        const obj = {
+            name,
+            company_name,
+            category,
+            consent,
+            phone,
+            link1,
+            link2,
+            bio
+        };
+        const userData = await primary
+            .model(constants.MODELS.user, userModel)
+            .create(obj);
+        return responseManager.onSuccess("Data added successfully", userData, res);
+    } catch (error) {
+        console.log(":::::error:::::", error);
+        return responseManager.internalServer(error, res);
+    }
+};
 
 exports.updateUser = async (req, res) => {
     try {
@@ -158,17 +158,17 @@ exports.searchUser = async (req, res) => {
     }
 };
 
-function cosineSimilarity(vecA, vecB) {
-    if (!vecA || !vecB || vecA.length !== vecB.length) return 0;
-    let dot = 0.0, normA = 0.0, normB = 0.0;
-    for (let i = 0; i < vecA.length; i++) {
-        dot += vecA[i] * vecB[i];
-        normA += vecA[i] * vecA[i];
-        normB += vecB[i] * vecB[i];
-    }
-    if (normA === 0 || normB === 0) return 0;
-    return dot / (Math.sqrt(normA) * Math.sqrt(normB));
-}
+// function cosineSimilarity(vecA, vecB) {
+//     if (!vecA || !vecB || vecA.length !== vecB.length) return 0;
+//     let dot = 0.0, normA = 0.0, normB = 0.0;
+//     for (let i = 0; i < vecA.length; i++) {
+//         dot += vecA[i] * vecB[i];
+//         normA += vecA[i] * vecA[i];
+//         normB += vecB[i] * vecB[i];
+//     }
+//     if (normA === 0 || normB === 0) return 0;
+//     return dot / (Math.sqrt(normA) * Math.sqrt(normB));
+// }
 
 // exports.searchUserByCategoryAndBio = async (req, res) => {
 //     try {
@@ -286,3 +286,18 @@ exports.searchUserByCategoryAndBio = async (req, res) => {
         return responseManager.internalServer(error, res);
     }
 };
+
+exports.getCategoryByUser = async (req, res) => {
+    try {
+        const primary = mongoConnection.useDb(constants.DEFAULT_DB);
+        const { phone } = req.body;
+        const userData = await primary.model(constants.MODELS.user, userModel).findOne({ phone: phone }).select("category").lean();
+        if(!userData){
+            return responseManager.onBadRequest("Data not found", res);
+        }
+        return responseManager.onSuccess("Data get successfully!", userData, res);
+    } catch (error) {
+        console.log(":::::error:::::", error);
+        return responseManager.internalServer(error, res);
+    }
+}
