@@ -365,6 +365,7 @@ exports.getCategoryByUser = async (req, res) => {
 
 exports.getRecommendations = async (req, res) => {
     const { userId } = req.body;
+    const primary = mongoConnection.useDb(constants.DEFAULT_DB);
     const User = primary.model(constants.MODELS.user, userModel);
     try {
         const currentUser = await User.findById(userId);
