@@ -8,5 +8,6 @@ router.post("/searchCompany", flowController.searchUser);
 router.post("/updateUser/:mobile", flowController.updateUser);
 router.post("/searchByCategory", flowController.searchUserByCategoryAndBio);
 router.post("/getCategoryByUser", flowController.getCategoryByUser);
+router.post("/getRecommendation", flowController.getRecommendation)
 
 module.exports = router
