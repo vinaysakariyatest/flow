@@ -64,7 +64,7 @@ exports.addUservector = async (req, res) => {
   try {
     const primary = mongoConnection.useDb(constants.DEFAULT_DB);
     let { name, company_name, category, consent, phone, link1, link2, bio } = req.body;
-
+    console.log(":::::req.body:::::", JSON.stringify(req.body));
     // Ensure category is an array
     if (!Array.isArray(category)) {
       category = [category];
