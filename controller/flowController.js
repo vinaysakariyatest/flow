@@ -546,10 +546,13 @@ exports.getRecommendations = async (req, res) => {
       $addToSet: { recommendationsShown: { $each: newRecommendedIds } },
       $inc: { searchCount: 1 }
     });
-
+    const safeRecommendations = recommendations.map(r => {
+      const { bio_vector, ...rest } = r; // bio_vector remove
+      return rest;
+    });
     return res.json({
-      recommendations,
-      totalShown: (currentUser.recommendationsShown || []).length + recommendations.length,
+      recommendations: safeRecommendations,
+      totalShown: (currentUser.recommendationsShown || []).length + safeRecommendations.length,
       searchCount: (currentUser.searchCount || 0) + 1
     });
 
