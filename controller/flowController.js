@@ -60,9 +60,48 @@ async function getEmbedding(text) {
   }
 }
 
+exports.addUservector = async (req, res) => {
+  try {
+    const primary = mongoConnection.useDb(constants.DEFAULT_DB);
+    let { name, company_name, category, consent, phone, link1, link2, bio } = req.body;
+
+    // Ensure category is an array
+    if (!Array.isArray(category)) {
+      category = [category];
+    }
+
+    let bio_vector = null;
+    bio_vector = await main(bio);
+
+    const obj = {
+      name,
+      company_name,
+      category,
+      consent,
+      phone,
+      link1,
+      link2,
+      bio,
+      bio_vector,
+      recommendationsShown: [],
+      searchCount: 0
+    };
+
+    const userData = await primary
+      .model(constants.MODELS.user, userModel)
+      .create(obj);
+
+    // console.log("User created successfully:", userData._id);
+    return responseManager.onSuccess("Data added successfully", userData, res);
+  } catch (error) {
+    console.error("Error adding user:", error?.response?.data || error);
+    return responseManager.internalServer(error, res);
+  }
+};
+
 exports.addUser = async (req, res) => {
   try {
-     const primary = mongoConnection.useDb(constants.DEFAULT_DB);
+    const primary = mongoConnection.useDb(constants.DEFAULT_DB);
     let { name, company_name, category, consent, phone, link1, link2, bio } = req.body;
 
     if (!Array.isArray(category)) {
@@ -369,7 +408,7 @@ exports.getRecommendations = async (req, res) => {
   // Constants
   const SIM_THRESHOLD = 0.75;
   const TOP_N = 1;           // 👈 har call pe ek hi record
-  const NUM_CANDIDATES = 200; 
+  const NUM_CANDIDATES = 200;
 
   try {
     const currentUser = await User.findById(userId).lean();
@@ -417,7 +456,7 @@ exports.getRecommendations = async (req, res) => {
           ]
         }
       },
-      { $project: { name: 1, link1: 1, link2:1, phone:1, bio: 1, bio_vector: 1, category: 1, vsScore: 1 } }
+      { $project: { name: 1, link1: 1, link2: 1, phone: 1, bio: 1, bio_vector: 1, category: 1, vsScore: 1 } }
     ];
 
     const candidates = await User.aggregate(pipeline);
@@ -477,7 +516,7 @@ exports.getRecommendations = async (req, res) => {
         {
           $match: { _id: { $ne: userObjectId } }
         },
-        { $project: { name: 1, link1: 1, link2:1, phone:1, bio: 1, bio_vector: 1, category: 1, vsScore: 1 } }
+        { $project: { name: 1, link1: 1, link2: 1, phone: 1, bio: 1, bio_vector: 1, category: 1, vsScore: 1 } }
       ];
 
       const candidates2 = await User.aggregate(resetPipeline);
