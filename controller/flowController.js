@@ -402,9 +402,11 @@ exports.getCategoryByUser = async (req, res) => {
 //   }
 // };
 
+
 exports.getRecommendations = async (req, res) => {
   const { userId } = req.body;
-
+  const primary = mongoConnection.useDb(constants.DEFAULT_DB);
+  const User = primary.model(constants.MODELS.user, userModel);
   // Constants
   const SIM_THRESHOLD = 0.75;
   const TOP_N = 1;           // 👈 har call pe ek hi record
