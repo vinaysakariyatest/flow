@@ -403,205 +403,67 @@ exports.getCategoryByUser = async (req, res) => {
 // };
 
 
-// exports.getRecommendations = async (req, res) => {
-//   const { userId } = req.body;
-//   const primary = mongoConnection.useDb(constants.DEFAULT_DB);
-//   const User = primary.model(constants.MODELS.user, userModel);
-//   // Constants
-//   const SIM_THRESHOLD = 0.75;
-//   const TOP_N = 1;
-//   const NUM_CANDIDATES = 200;
-
-//   try {
-//     const currentUser = await User.findById(userId).lean();
-//     if (!currentUser) {
-//       return res.status(404).json({ message: "User not found" });
-//     }
-
-//     const queryVecRaw = currentUser.bio_vector;
-//     if (!Array.isArray(queryVecRaw) || queryVecRaw.length === 0) {
-//       return res.status(400).json({ message: "Current user does not have a valid bio_vector" });
-//     }
-
-//     const queryVec = queryVecRaw.map(v => Number(v));
-
-//     const categoryArray = Array.isArray(currentUser.category)
-//       ? currentUser.category
-//       : (currentUser.category ? [currentUser.category] : []);
-
-//     const shownIds = (currentUser.recommendationsShown || []).map(id => {
-//       try { return mongoose.Types.ObjectId(id); } catch (e) { return id; }
-//     });
-
-//     const userObjectId = new mongoose.Types.ObjectId(userId);
-
-//     // Vector search pipeline
-//     const pipeline = [
-//       {
-//         $vectorSearch: {
-//           index: "vector_index",
-//           path: "bio_vector",
-//           queryVector: queryVec,
-//           numCandidates: NUM_CANDIDATES,
-//           limit: NUM_CANDIDATES,
-//           filter: {
-//             category: { $in: categoryArray }
-//           }
-//         }
-//       },
-//       { $addFields: { vsScore: { $meta: "vectorSearchScore" } } },
-//       {
-//         $match: {
-//           $and: [
-//             { _id: { $ne: userObjectId } },       // 👈 userId ko exclude
-//             { _id: { $nin: shownIds } }          // 👈 already shown ids
-//           ]
-//         }
-//       },
-//       { $project: { name: 1, link1: 1, link2: 1, phone: 1, bio: 1, bio_vector: 1, category: 1, vsScore: 1 } }
-//     ];
-
-//     const candidates = await User.aggregate(pipeline);
-
-//     // Cosine similarity helper
-//     const cosine = (a, b) => {
-//       if (!Array.isArray(a) || !Array.isArray(b) || a.length !== b.length) return -1;
-//       let dot = 0, na = 0, nb = 0;
-//       for (let i = 0; i < a.length; i++) {
-//         const va = Number(a[i]) || 0;
-//         const vb = Number(b[i]) || 0;
-//         dot += va * vb;
-//         na += va * va;
-//         nb += vb * vb;
-//       }
-//       if (na === 0 || nb === 0) return -1;
-//       return dot / (Math.sqrt(na) * Math.sqrt(nb));
-//     };
-
-//     const withSim = candidates.map(c => {
-//       const candVec = Array.isArray(c.bio_vector) ? c.bio_vector.map(Number) : [];
-//       const sim = (candVec.length === queryVec.length) ? cosine(queryVec, candVec) : -1;
-//       return { ...c, similarity: sim };
-//     });
-
-//     let filtered = withSim.filter(x => x.similarity >= SIM_THRESHOLD);
-//     filtered.sort((a, b) => b.similarity - a.similarity);
-
-//     const relaxThresholds = [0.70, 0.65, 0.60];
-//     if (filtered.length === 0) {
-//       for (const t of relaxThresholds) {
-//         filtered = withSim.filter(x => x.similarity >= t);
-//         if (filtered.length) break;
-//       }
-//     }
-
-//     let recommendations = filtered.slice(0, TOP_N);
-
-//     // Reset if all users shown
-//     if (recommendations.length === 0 && shownIds.length > 0) {
-//       await User.findByIdAndUpdate(currentUser._id, { $set: { recommendationsShown: [], searchCount: 0 } });
-
-//       const resetPipeline = [
-//         {
-//           $vectorSearch: {
-//             index: "vector_index",
-//             path: "bio_vector",
-//             queryVector: queryVec,
-//             numCandidates: NUM_CANDIDATES,
-//             limit: NUM_CANDIDATES,
-//             filter: {
-//               category: { $in: categoryArray }
-//             }
-//           }
-//         },
-//         { $addFields: { vsScore: { $meta: "vectorSearchScore" } } },
-//         {
-//           $match: { _id: { $ne: userObjectId } }
-//         },
-//         { $project: { name: 1, link1: 1, link2: 1, phone: 1, bio: 1, bio_vector: 1, category: 1, vsScore: 1 } }
-//       ];
-
-//       const candidates2 = await User.aggregate(resetPipeline);
-//       const withSim2 = candidates2.map(c => {
-//         const candVec = Array.isArray(c.bio_vector) ? c.bio_vector.map(Number) : [];
-//         const sim = (candVec.length === queryVec.length) ? cosine(queryVec, candVec) : -1;
-//         return { ...c, similarity: sim };
-//       });
-
-//       withSim2.sort((a, b) => b.similarity - a.similarity);
-//       recommendations = withSim2.filter(x => x.similarity >= SIM_THRESHOLD).slice(0, TOP_N);
-
-//       if (recommendations.length === 0) {
-//         recommendations = withSim2.slice(0, TOP_N);
-//       }
-//     }
-
-//     if (recommendations.length === 0) {
-//       return res.json({ message: "No matching profiles found", recommendations: [] });
-//     }
-
-//     // Persist shown recommendations
-//     const newRecommendedIds = recommendations.map(r => r._id);
-//     await User.findByIdAndUpdate(currentUser._id, {
-//       $addToSet: { recommendationsShown: { $each: newRecommendedIds } },
-//       $inc: { searchCount: 1 }
-//     });
-//     const safeRecommendations = recommendations.map(r => {
-//       const { bio_vector, ...rest } = r; // bio_vector remove
-//       return rest;
-//     });
-//     return res.json({
-//       recommendations: safeRecommendations,
-//       totalShown: (currentUser.recommendationsShown || []).length + safeRecommendations.length,
-//       searchCount: (currentUser.searchCount || 0) + 1
-//     });
-
-//   } catch (error) {
-//     console.error("Error getting recommendations:", error);
-//     return res.status(500).json({ message: "Server error", error: error.message });
-//   }
-// };
-
 exports.getRecommendations = async (req, res) => {
   const { userId } = req.body;
   const primary = mongoConnection.useDb(constants.DEFAULT_DB);
   const User = primary.model(constants.MODELS.user, userModel);
-
-  const SIM_THRESHOLD = 0.6;  // Lower threshold to allow partial matches
+  // Constants
+  const SIM_THRESHOLD = 0.75;
   const TOP_N = 1;
+  const NUM_CANDIDATES = 200;
 
   try {
     const currentUser = await User.findById(userId).lean();
-    if (!currentUser) return res.status(404).json({ message: "User not found" });
+    if (!currentUser) {
+      return res.status(404).json({ message: "User not found" });
+    }
 
-    const queryVec = Array.isArray(currentUser.bio_vector)
-      ? currentUser.bio_vector.map(Number)
-      : [];
-    if (queryVec.length === 0) return res.status(400).json({ message: "Current user does not have bio_vector" });
+    const queryVecRaw = currentUser.bio_vector;
+    if (!Array.isArray(queryVecRaw) || queryVecRaw.length === 0) {
+      return res.status(400).json({ message: "Current user does not have a valid bio_vector" });
+    }
+
+    const queryVec = queryVecRaw.map(v => Number(v));
 
     const categoryArray = Array.isArray(currentUser.category)
       ? currentUser.category
       : (currentUser.category ? [currentUser.category] : []);
 
-    const shownIds = (currentUser.recommendationsShown || []).map(id => id.toString());
+    const shownIds = (currentUser.recommendationsShown || []).map(id => {
+      try { return mongoose.Types.ObjectId(id); } catch (e) { return id; }
+    });
+
     const userObjectId = new mongoose.Types.ObjectId(userId);
 
-    // Fetch candidates
-    let candidates = await User.find({
-      _id: { $ne: userObjectId, $nin: shownIds },
-      category: { $in: categoryArray },
-      bio_vector: { $exists: true, $ne: [] }
-    }).lean();
+    // Vector search pipeline
+    const pipeline = [
+      {
+        $vectorSearch: {
+          index: "vector_index",
+          path: "bio_vector",
+          queryVector: queryVec,
+          numCandidates: NUM_CANDIDATES,
+          limit: NUM_CANDIDATES,
+          filter: {
+            category: { $in: categoryArray }
+          }
+        }
+      },
+      { $addFields: { vsScore: { $meta: "vectorSearchScore" } } },
+      {
+        $match: {
+          $and: [
+            { _id: { $ne: userObjectId } },    
+            { _id: { $nin: shownIds } }
+          ]
+        }
+      },
+      { $project: { name: 1, link1: 1, link2: 1, phone: 1, bio: 1, bio_vector: 1, category: 1, vsScore: 1 } }
+    ];
 
-    // Reset if exhausted
-    if (candidates.length === 0 && shownIds.length > 0) {
-      await User.findByIdAndUpdate(userId, { $set: { recommendationsShown: [] } });
-      return res.json({ message: "All users shown, reset done. Call again.", recommendations: [] });
-    }
+    const candidates = await User.aggregate(pipeline);
 
-    if (candidates.length === 0) return res.json({ message: "No matching profiles found", recommendations: [] });
-
-    // Cosine similarity
+    // Cosine similarity helper
     const cosine = (a, b) => {
       if (!Array.isArray(a) || !Array.isArray(b) || a.length !== b.length) return -1;
       let dot = 0, na = 0, nb = 0;
@@ -612,38 +474,90 @@ exports.getRecommendations = async (req, res) => {
         na += va * va;
         nb += vb * vb;
       }
-      return (na && nb) ? dot / (Math.sqrt(na) * Math.sqrt(nb)) : -1;
+      if (na === 0 || nb === 0) return -1;
+      return dot / (Math.sqrt(na) * Math.sqrt(nb));
     };
 
-    // Compute similarity
-    const scored = candidates.map(c => {
-      const vec = Array.isArray(c.bio_vector) ? c.bio_vector.map(Number) : [];
-      const similarity = (vec.length === queryVec.length ? cosine(queryVec, vec) : -1);
-      return { ...c, similarity };
-    }).filter(c => c.similarity >= SIM_THRESHOLD);
-
-    if (scored.length === 0) return res.json({ message: "No semantic match found", recommendations: [] });
-
-    // Pick top match
-    scored.sort((a, b) => b.similarity - a.similarity);
-    const bestMatch = scored[0];
-
-    // Update shown list
-    await User.findByIdAndUpdate(userId, {
-      $addToSet: { recommendationsShown: bestMatch._id },
-      $inc: { searchCount: 1 }
+    const withSim = candidates.map(c => {
+      const candVec = Array.isArray(c.bio_vector) ? c.bio_vector.map(Number) : [];
+      const sim = (candVec.length === queryVec.length) ? cosine(queryVec, candVec) : -1;
+      return { ...c, similarity: sim };
     });
 
-    const { bio_vector, ...rest } = bestMatch;
+    let filtered = withSim.filter(x => x.similarity >= SIM_THRESHOLD);
+    filtered.sort((a, b) => b.similarity - a.similarity);
+
+    const relaxThresholds = [0.70, 0.65, 0.60];
+    if (filtered.length === 0) {
+      for (const t of relaxThresholds) {
+        filtered = withSim.filter(x => x.similarity >= t);
+        if (filtered.length) break;
+      }
+    }
+
+    let recommendations = filtered.slice(0, TOP_N);
+
+    // Reset if all users shown
+    if (recommendations.length === 0 && shownIds.length > 0) {
+      await User.findByIdAndUpdate(currentUser._id, { $set: { recommendationsShown: [], searchCount: 0 } });
+
+      const resetPipeline = [
+        {
+          $vectorSearch: {
+            index: "vector_index",
+            path: "bio_vector",
+            queryVector: queryVec,
+            numCandidates: NUM_CANDIDATES,
+            limit: NUM_CANDIDATES,
+            filter: {
+              category: { $in: categoryArray }
+            }
+          }
+        },
+        { $addFields: { vsScore: { $meta: "vectorSearchScore" } } },
+        {
+          $match: { _id: { $ne: userObjectId } }
+        },
+        { $project: { name: 1, link1: 1, link2: 1, phone: 1, bio: 1, bio_vector: 1, category: 1, vsScore: 1 } }
+      ];
+
+      const candidates2 = await User.aggregate(resetPipeline);
+      const withSim2 = candidates2.map(c => {
+        const candVec = Array.isArray(c.bio_vector) ? c.bio_vector.map(Number) : [];
+        const sim = (candVec.length === queryVec.length) ? cosine(queryVec, candVec) : -1;
+        return { ...c, similarity: sim };
+      });
+
+      withSim2.sort((a, b) => b.similarity - a.similarity);
+      recommendations = withSim2.filter(x => x.similarity >= SIM_THRESHOLD).slice(0, TOP_N);
+
+      if (recommendations.length === 0) {
+        recommendations = withSim2.slice(0, TOP_N);
+      }
+    }
+
+    if (recommendations.length === 0) {
+      return res.json({ message: "No matching profiles found", recommendations: [] });
+    }
+
+    // Persist shown recommendations
+    const newRecommendedIds = recommendations.map(r => r._id);
+    await User.findByIdAndUpdate(currentUser._id, {
+      $addToSet: { recommendationsShown: { $each: newRecommendedIds } },
+      $inc: { searchCount: 1 }
+    });
+    const safeRecommendations = recommendations.map(r => {
+      const { bio_vector, ...rest } = r; // bio_vector remove
+      return rest;
+    });
     return res.json({
-      recommendations: [rest],
-      totalShown: (currentUser.recommendationsShown?.length || 0) + 1,
+      recommendations: safeRecommendations,
+      totalShown: (currentUser.recommendationsShown || []).length + safeRecommendations.length,
       searchCount: (currentUser.searchCount || 0) + 1
     });
 
   } catch (error) {
-    console.error("Error getting vector recommendations:", error);
+    console.error("Error getting recommendations:", error);
     return res.status(500).json({ message: "Server error", error: error.message });
   }
 };
-
