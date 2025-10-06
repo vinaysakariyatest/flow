@@ -198,6 +198,7 @@ exports.updateUser = async (req, res) => {
       try {
         const bio_vector = await main(bio);
         updateData.bio_vector = bio_vector;
+        console.log("BIO Generated");
       } catch (err) {
         console.error("Error generating bio_vector:", err);
         return responseManager.internalServer("Failed to generate bio vector", res);
