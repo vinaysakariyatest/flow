@@ -167,18 +167,21 @@ exports.addUser = async (req, res) => {
 exports.updateUser = async (req, res) => {
   try {
     const primary = mongoConnection.useDb(constants.DEFAULT_DB);
-    let { mobile } = req.params;
+    const { mobile } = req.params;
 
-    const existingUser = await primary
-      .model(constants.MODELS.user, userModel)
-      .findOne({ phone: mobile })
-      .lean();
+    const User = primary.model(constants.MODELS.user, userModel);
 
+    const existingUser = await User.findOne({ phone: mobile }).lean();
     if (!existingUser) {
       return responseManager.onBadRequest("User not found", res);
     }
+
     let { phone, name, company_name, category, consent, link1, link2, bio } = req.body;
     console.log("=======req.body", JSON.stringify(req.body));
+
+    if (category && !Array.isArray(category)) {
+      category = [category];
+    }
 
     const updateData = {
       ...(phone && { phone }),
@@ -188,21 +191,71 @@ exports.updateUser = async (req, res) => {
       ...(consent && { consent }),
       ...(link1 && { link1 }),
       ...(link2 && { link2 }),
-      ...(bio && { bio }),
+      ...(bio && { bio })
     };
-    const userData = await primary
-      .model(constants.MODELS.user, userModel)
-      .findOneAndUpdate(
-        { phone: mobile },
-        { $set: updateData },
-        { new: true }
-      );
-    return responseManager.onSuccess("Data updated successfully", userData, res);
+
+    if (bio) {
+      try {
+        const bio_vector = await main(bio);
+        updateData.bio_vector = bio_vector;
+      } catch (err) {
+        console.error("Error generating bio_vector:", err);
+        return responseManager.internalServer("Failed to generate bio vector", res);
+      }
+    }
+
+    const updatedUser = await User.findOneAndUpdate(
+      { phone: mobile },
+      { $set: updateData },
+      { new: true }
+    );
+
+    return responseManager.onSuccess("Data updated successfully", updatedUser, res);
   } catch (error) {
-    console.log(":::::error:::::", error);
+    console.error(":::::error:::::", error);
     return responseManager.internalServer(error, res);
   }
 };
+
+// exports.updateUser = async (req, res) => {
+//   try {
+//     const primary = mongoConnection.useDb(constants.DEFAULT_DB);
+//     let { mobile } = req.params;
+
+//     const existingUser = await primary
+//       .model(constants.MODELS.user, userModel)
+//       .findOne({ phone: mobile })
+//       .lean();
+
+//     if (!existingUser) {
+//       return responseManager.onBadRequest("User not found", res);
+//     }
+//     let { phone, name, company_name, category, consent, link1, link2, bio } = req.body;
+//     console.log("=======req.body", JSON.stringify(req.body));
+
+//     const updateData = {
+//       ...(phone && { phone }),
+//       ...(name && { name }),
+//       ...(company_name && { company_name }),
+//       ...(category && { category }),
+//       ...(consent && { consent }),
+//       ...(link1 && { link1 }),
+//       ...(link2 && { link2 }),
+//       ...(bio && { bio }),
+//     };
+//     const userData = await primary
+//       .model(constants.MODELS.user, userModel)
+//       .findOneAndUpdate(
+//         { phone: mobile },
+//         { $set: updateData },
+//         { new: true }
+//       );
+//     return responseManager.onSuccess("Data updated successfully", userData, res);
+//   } catch (error) {
+//     console.log(":::::error:::::", error);
+//     return responseManager.internalServer(error, res);
+//   }
+// };
 
 exports.searchUser = async (req, res) => {
   try {
